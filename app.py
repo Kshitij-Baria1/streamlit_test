@@ -118,13 +118,15 @@ def clean_stale_temp_files():
 
 # add excel_files to session state
 if 'excel_files' not in st.session_state:
-    st.session_state.excel_files = copy_updated_excel_files(Path(constants.ORIGINAL_EXCEL_ROOT_FOLDER), TEMP_EXCEL_ROOT_FOLDER)
+    st.session_state.excel_files = copy_updated_excel_files(Path(constants.ORIGINAL_EXCEL_ROOT_FOLDER),
+                                                            TEMP_EXCEL_ROOT_FOLDER)
 
 # refresh data on button press
 if st.button("🔄 Refresh Excel Data"):
     st.session_state.skipped_excel_files = []
     st.cache_data.clear()
-    st.session_state.excel_files = copy_updated_excel_files(Path(constants.ORIGINAL_EXCEL_ROOT_FOLDER), TEMP_EXCEL_ROOT_FOLDER)
+    st.session_state.excel_files = copy_updated_excel_files(Path(constants.ORIGINAL_EXCEL_ROOT_FOLDER),
+                                                            TEMP_EXCEL_ROOT_FOLDER)
 
 # Select a file from the updated/existing files stored in session state
 selected_file = st.selectbox("Select a file", st.session_state.excel_files)
@@ -165,37 +167,45 @@ with sidebar:
     st.title("Filter")
     # filter fields
     license_name = st.text_input("License Name", key="license_name_input")
-    entity_jurisdiction = st.multiselect("Entity jurisdiction", options=constants.USA_STATE_ABBREVIATIONS, key="entity_jurisdiction_multiselect")
+    entity_jurisdiction = st.multiselect("Entity jurisdiction", options=constants.USA_STATE_ABBREVIATIONS,
+                                         key="entity_jurisdiction_multiselect")
     license_jurisdiction_name = st.text_input("License jurisdiction name", key="license_jurisdiction_name")
 
     # reset filters button
     reset_filters_button = st.button("❌ Reset Filters", on_click=reset_filters)
 
-
 # apply filters
 if license_name:
-    st.session_state.filtered_df = st.session_state.filtered_df[st.session_state.filtered_df["License Name"].str.contains(license_name, case=False, na=False)]
+    st.session_state.filtered_df = st.session_state.filtered_df[
+        st.session_state.filtered_df["License Name"].str.contains(license_name, case=False, na=False)]
 if entity_jurisdiction:
-    st.session_state.filtered_df = st.session_state.filtered_df[st.session_state.filtered_df["Entity Jurisdiction"].isin(entity_jurisdiction)]
+    st.session_state.filtered_df = st.session_state.filtered_df[
+        st.session_state.filtered_df["Entity Jurisdiction"].isin(entity_jurisdiction)]
 if license_jurisdiction_name:
-    st.session_state.filtered_df = st.session_state.filtered_df[st.session_state.filtered_df["License jurisdiction name"].str.contains(license_jurisdiction_name, case=False, na=False)]
-
-
+    st.session_state.filtered_df = st.session_state.filtered_df[
+        st.session_state.filtered_df["License jurisdiction name"].str.contains(license_jurisdiction_name, case=False,
+                                                                               na=False)]
 
 # add selected_rows_df to session state
 if "selected_rows_df" not in st.session_state:
     st.session_state.selected_rows_df = pd.DataFrame()
 
-
 # display filtered_df
 if "filtered_df" in st.session_state and not st.session_state.filtered_df.empty:
+    # add row button
+    if st.button("➕ Add row"):
+        empty_row = pd.DataFrame([{col: "" for col in st.session_state.filtered_df.columns}])
+        st.session_state.filtered_df = pd.concat([st.session_state.filtered_df, empty_row], ignore_index=True)
+
+    # show filtered_df
     gb = GridOptionsBuilder.from_dataframe(st.session_state.filtered_df)
+    gb.configure_default_column(editable=True)
     gb.configure_selection(selection_mode="multiple", header_checkbox=True, use_checkbox=True)
     gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=50)
     grid_response = AgGrid(
         st.session_state.filtered_df,
         gridOptions=gb.build(),
-        update_mode=GridUpdateMode.SELECTION_CHANGED,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
         use_container_width=True,
         height=300
     )
@@ -204,8 +214,39 @@ if "filtered_df" in st.session_state and not st.session_state.filtered_df.empty:
     selected_rows = pd.DataFrame(grid_response["selected_rows"])
 
     # columns to add and clear selection
-    col1, col2 = st.columns([1, 1])
+    col1, col2, col3 = st.columns(3)
     with col1:
+        if st.button("💾 Save Changes"):
+            try:
+                # grab the truly edited data
+                edited_df = pd.DataFrame(grid_response["data"])
+                # clean up any stray metadata
+                edited_df = edited_df[[c for c in edited_df.columns if c in constants.EXPECTED_HEADERS]]
+                # re-order to your expected schema
+                edited_df = edited_df[constants.EXPECTED_HEADERS]
+
+                # resolve the original path
+                original_path = (
+                        constants.ORIGINAL_EXCEL_ROOT_FOLDER
+                        / selected_file.relative_to(TEMP_EXCEL_ROOT_FOLDER)
+                )
+
+                # write it out
+                edited_df.to_excel(original_path, index=False, engine="openpyxl")
+
+                # (optional) Mirror to temp so the UI reloads
+                selected_file.write_bytes(original_path.read_bytes())
+
+                # clear & reload only this file’s cache
+                detect_header_row.clear()
+                load_and_standardize_excel.clear()
+                st.session_state.df = load_and_standardize_excel(selected_file, constants.EXPECTED_HEADERS)
+                st.session_state.filtered_df = st.session_state.df.copy()
+
+                st.toast(f"✅ Saved {original_path.name} with your edits.")
+            except Exception as e:
+                st.toast(f"❌ Could not save edits: {e}")
+    with col2:
         if st.button("➕ Add to selection") and not selected_rows.empty:
             selected_rows = selected_rows[st.session_state.filtered_df.columns]
             key_columns = [col for col in st.session_state.filtered_df.columns if col != "Entity Name"]
@@ -213,7 +254,7 @@ if "filtered_df" in st.session_state and not st.session_state.filtered_df.empty:
                 [st.session_state.selected_rows_df, selected_rows],
                 ignore_index=True
             ).drop_duplicates(key_columns)
-    with col2:
+    with col3:
         if st.button("🗑️ Clear selection"):
             st.session_state.selected_rows_df = pd.DataFrame()
             selected_rows = []
