@@ -232,20 +232,26 @@ if "filtered_df" in st.session_state and not st.session_state.filtered_df.empty:
                 )
 
                 # write it out
-                edited_df.to_excel(original_path, index=False, engine="openpyxl")
+                try:
+                    edited_df.to_excel(original_path, index=False, engine="openpyxl")
+                    st.toast(f"Saved to original {original_path} with your edits.", icon="✅")
+                except Exception as e:
+                    st.toast(f"Could not save edits to original file: {e}", icon="⚠️")
 
                 # (optional) Mirror to temp so the UI reloads
-                selected_file.write_bytes(original_path.read_bytes())
+                try:
+                    selected_file.write_bytes(original_path.read_bytes())
+                    st.toast(f"Saved to temp {selected_file} with your edits.", icon="✅")
+                except Exception as e:
+                    st.toast(f"Could not save edits to temp file: {e}", icon="⚠️")
 
                 # clear & reload only this file’s cache
                 detect_header_row.clear()
                 load_and_standardize_excel.clear()
                 st.session_state.df = load_and_standardize_excel(selected_file, constants.EXPECTED_HEADERS)
                 st.session_state.filtered_df = st.session_state.df.copy()
-
-                st.toast(f"✅ Saved {original_path.name} with your edits.")
             except Exception as e:
-                st.toast(f"❌ Could not save edits: {e}")
+                st.toast(f"Could not save edits: {e}", icon="⚠️")
     with col2:
         if st.button("➕ Add to selection") and not selected_rows.empty:
             selected_rows = selected_rows[st.session_state.filtered_df.columns]
